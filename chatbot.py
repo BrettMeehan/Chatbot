@@ -5,7 +5,94 @@
 import movielens
 
 import numpy as np
+import re
 
+class Movie:
+    def __init__(self):
+      # possible titles for the movie
+      self.titles = []
+
+      # a tuple where the first entry is the year the movie was made; 
+      # for shows, first entry is start year and second entry is end year     
+      self.year = None
+
+def edit_distance(word1, word2):
+  '''
+  Case insensitive edit distance, excluding starting and trailing whitespace
+  '''
+  word1 = word1.strip().lower()
+  word2 = word2.strip().lower()
+  dp = [[0]*(len(word2) + 1) for i in range(len(word1) + 1)]
+
+  for i in range(1, len(word1) + 1):
+      dp[i][0] = i
+  for j in range(1, len(word2) + 1):
+      dp[0][j] = j
+
+  for i in range(1, len(word1) + 1):
+    for j in range(1, len(word2) + 1):
+      if word1[i - 1] == word2[j - 1]:
+        dp[i][j] = dp[i - 1][j - 1]
+      else:
+        dp[i][j] = min(dp[i - 1][j - 1] + 2,
+                       dp[i - 1][j]     + 1,
+                       dp[i][j - 1]     + 1)
+  return dp[-1][-1]
+
+def extract_titles_and_year(title):
+  '''
+  Returns a new Movie object with possible extracted movie titles and the movie
+  year (start and end year for shows)
+  '''
+  mov = Movie()
+  all_titles = []
+
+  year_pat = '\((\d{4})-?(\d{4})?\)'
+  pats = re.findall(year_pat, title)
+  if pats:
+    if pats[0][1] == '':
+      mov.year = (pats[0][0],)
+    else:
+      mov.year = pats[0]
+    if len(mov.year) == 1:
+      title = title.replace('(' + mov.year[0] + ')', '')
+    elif len(mov.year) == 2:
+      title = title.replace('(' + mov.year[0] + '-' + mov.year[1] + ')', '')
+  
+  alt_name_pat = '\((.*)\)'
+  pats = re.findall(alt_name_pat, title)
+  if pats:
+    alt_name = pats[0]
+    title = title.replace('(' + alt_name + ')', '')
+    alt_name = alt_name.replace('a.k.a.', '')
+
+  # make sure full title is first in list
+  all_titles.append(title)
+  if pats:
+    all_titles.append(alt_name)
+  if ':' in title:
+    all_titles.extend(title.split(':'))
+
+  # strip whitespace and move articles to end
+  for i in range(len(all_titles)):
+    all_titles[i] = move_article_to_end(all_titles[i].strip())
+  mov.titles = all_titles
+
+  return mov
+   
+def move_article_to_end(title):
+  '''
+  Moves English articles (a, an, the) from the front of the title to the end,
+  as is convention
+  '''
+  if bool(re.match('A ', title, re.I)):
+    title = title[2:] + ', ' + 'A'
+  elif bool(re.match('An ', title, re.I)):
+    title = title[3:] + ', ' + 'An'
+  elif bool(re.match('The ', title, re.I)):
+    title = title[4:] + ', ' + 'The'
+
+  return title
 
 class Chatbot:
     """Simple class to implement the chatbot for PA 6."""
@@ -22,6 +109,10 @@ class Chatbot:
       self.titles, ratings = movielens.ratings()
       self.sentiment = movielens.sentiment()
 
+      # preprocess movie list by extracting possible titles and year
+      self.movies = []
+      for entry in self.titles:
+        self.movies.append(extract_titles_and_year(entry[0]))
       #############################################################################
       # TODO: Binarize the movie ratings matrix.                                  #
       #############################################################################
@@ -94,8 +185,16 @@ class Chatbot:
       if self.creative:
         response = "I processed {} in creative mode!!".format(line)
       else:
-        response = "I processed {} in starter mode!!".format(line)
-
+        #response = "I processed {} in starter mode!!".format(line)
+        possible_titles = self.extract_titles(line)
+        matches = []
+        for title in possible_titles:
+          matches.append((title, self.find_movies_by_title(title)))
+        if len(possible_titles) == 0:
+          response = "I'm sorry, please tell me about a movie you liked"
+        else:
+          response = "You are talking about: " +\
+                     ', '.join('{}'.format(k) for k in matches)
       #############################################################################
       #                             END OF YOUR CODE                              #
       #############################################################################
@@ -120,7 +219,12 @@ class Chatbot:
       :param text: a user-supplied line of text that may contain movie titles
       :returns: list of movie titles that are potentially in the text
       """
-      return []
+      potential_titles = []
+      if self.creative:
+        pass
+      else:
+        potential_titles = re.findall('"(.*?)"', text)
+      return potential_titles
 
     def find_movies_by_title(self, title):
       """ Given a movie title, return a list of indices of matching movies.
@@ -138,7 +242,17 @@ class Chatbot:
       :param title: a string containing a movie title
       :returns: a list of indices of matching movies
       """
-      return []
+      candidates = []
+      if self.creative:
+        pass
+      else:
+        movie = extract_titles_and_year(title)
+        for i in range(len(self.movies)):
+          if set(movie.titles).intersection(set(self.movies[i].titles)):
+            candidates.append(i)
+            if movie.year and movie.year == self.movies[i].year:
+              return candidates
+      return candidates
 
 
     def extract_sentiment(self, text):
