@@ -6,6 +6,7 @@ import movielens
 
 import numpy as np
 import re
+import random
 
 class Movie:
     def __init__(self):
@@ -70,12 +71,15 @@ def extract_titles_and_year(title):
   all_titles.append(title)
   if pats:
     all_titles.append(alt_name)
-  if ':' in title:
-    all_titles.extend(title.split(':'))
+#  if ':' in title:
+#    all_titles.extend(title.split(':'))
 
-  # strip whitespace and move articles to end
+  # strip whitespace, change [&+] to "and", move articles to end
   for i in range(len(all_titles)):
-    all_titles[i] = move_article_to_end(all_titles[i].strip())
+    t = move_article_to_end(all_titles[i].strip())
+    t = t.replace('&', 'and')
+    t = t.replace('+', 'and')
+    all_titles[i] = t
   mov.titles = all_titles
 
   return mov
@@ -83,7 +87,8 @@ def extract_titles_and_year(title):
 def move_article_to_end(title):
   '''
   Moves English articles (a, an, the) from the front of the title to the end,
-  as is convention
+  as is convention. Also move French articles (le, la, les) and Spanish
+  articles (el, la, los)
   '''
   if bool(re.match('A ', title, re.I)):
     title = title[2:] + ', ' + 'A'
@@ -91,7 +96,16 @@ def move_article_to_end(title):
     title = title[3:] + ', ' + 'An'
   elif bool(re.match('The ', title, re.I)):
     title = title[4:] + ', ' + 'The'
-
+  elif bool(re.match('Le ', title, re.I)):
+    title = title[3:] + ', ' + 'Le'
+  elif bool(re.match('La ', title, re.I)):
+    title = title[3:] + ', ' + 'La'
+  elif bool(re.match('Les ', title, re.I)):
+    title = title[4:] + ', ' + 'Les'
+  elif bool(re.match('El ', title, re.I)):
+    title = title[3:] + ', ' + 'El'
+  elif bool(re.match('Los ', title, re.I)):
+    title = title[4:] + ', ' + 'Los'
   return title
 
 class Chatbot:
@@ -108,6 +122,17 @@ class Chatbot:
       # movie i by user j
       self.titles, ratings = movielens.ratings()
       self.sentiment = movielens.sentiment()
+
+      # a tuple with the index(es) of the current movie being discussed 
+      self.current_movie = None
+      # a tuple with the sentiment of the movie being discussed
+      self.current_sentiment = None
+      # a list of (movie, sentiment) tuples that the user has described and
+      # the chatbot has processed
+      self.user_movies = []
+      self.user_movie_set = set()
+
+      self.prefix_match_found = False
 
       # preprocess movie list by extracting possible titles and year
       self.movies = []
@@ -182,23 +207,90 @@ class Chatbot:
       # possibly calling other functions. Although modular code is not graded,    #
       # it is highly recommended.                                                 #
       #############################################################################
+      response = ''
+      # extract titles and matches
+      matches = self.get_possible_matching_titles(line)
+      # extract sentiment
+      sentiment = self.extract_sentiment(line)
+
       if self.creative:
-        response = "I processed {} in creative mode!!".format(line)
-      else:
-        #response = "I processed {} in starter mode!!".format(line)
-        possible_titles = self.extract_titles(line)
-        matches = []
-        for title in possible_titles:
-          matches.append((title, self.find_movies_by_title(title)))
-        if len(possible_titles) == 0:
-          response = "I'm sorry, please tell me about a movie you liked"
+        if len(matches) == 0:
+          return self.generate_response_to_irrelevant_input()
         else:
           response = "You are talking about: " +\
                      ', '.join('{}'.format(k) for k in matches)
+      else:
+        if len(matches) == 0:
+          return self.generate_response_to_irrelevant_input() 
+        elif len(matches) > 1:
+          return 'Please tell me about one movie at a time.'
+        else:
+          title, idxs = matches[0]
+          sentiment = self.extract_sentiment(line.replace(title, ''))
+          if sentiment == 0:
+            return "So did you like {} or hate it? Please tell me.".format(title)
+          else:
+            if len(idxs) > 1:
+              return "I found multiple matches for {}. Can you be more specific? Maybe try telling me the year as well.".format(title)
+            elif len(idxs) == 0:
+              return "Hmm, I couldn't find a match for {}. Please tell me about some other movies you have watched!".format(title)
+            else:
+              if sentiment > 0:
+                if idxs[0] in self.user_movie_set:
+                  response = "I think you already told me about that movie."
+                else:
+                  response = "Great! So you liked {}. ".format(title)
+                  self.process_movie(idxs[0], sentiment)
+              else:
+                response = "Okay, so you didn't like {}. ".format(title)
+            
+      # recommend once we have 5 movies
+      if len(self.user_movies) >= 5:
+        response += ' Recommending movies...'
+      else:
+        response += " " + self.generate_request_for_more_movies()   
       #############################################################################
       #                             END OF YOUR CODE                              #
       #############################################################################
       return response
+
+    def generate_response_to_irrelevant_input(self):
+      responses = [
+                   "I'm sorry, but I want to hear about a movie you liked.",
+                   "That's really cool and all, but can we go back to talking about movies? I want to know more about movies you enjoyed!",
+                   "Maybe we can talk about that later. Let's get back to talking about movies. Why don't you tell me what you thought about a movie you watched recently?"
+                  ]
+      return responses[random.randint(0, len(responses) - 1)]
+
+    def generate_request_for_more_movies(self):
+      responses = [
+                   "Please tell me about more movies you've watched!",
+                   "Tell me another one of your favorite movies. This is so much fun!",
+                   "What is another movie you liked?"
+                  ]
+      return responses[random.randint(0, len(responses) - 1)]
+
+    def get_possible_matching_titles(self, line):
+      possible_titles = self.extract_titles(line)
+      matches = []
+      if self.creative:
+        self.prefix_match_found = False
+        for title in possible_titles:
+          movie_idxs = self.find_movies_by_title(title)
+          if not self.prefix_match_found:
+            movie_idxs.extend(self.find_movies_closest_to_title(title, max_distance=3))
+            movie_idxs = sorted(list(set(movie_idxs)))
+          matches.append((title, movie_idxs))
+      else: 
+        for title in possible_titles:
+          matches.append((title, self.find_movies_by_title(title)))
+      return matches
+
+    def process_movie(self, movie_index, sentiment):
+      self.user_movies.append((movie_index, sentiment))
+      self.user_movie_set.add(movie_index)
+      self.current_movie = None
+      self.current_sentiment = None
 
     def extract_titles(self, text):
       """Extract potential movie titles from a line of text.
@@ -221,7 +313,13 @@ class Chatbot:
       """
       potential_titles = []
       if self.creative:
-        pass
+        pat1 = '"(.*?)"'
+        #pat2 = '((?:[A-HJ-Z0-9][^\s]*|I [A-Z0-9])(?:.*[A-Z0-9][^\s]*)?\s*(?:\(\d{4}\))?)'
+        stop_words = 'at|as|of|on|to|with|and|the|in|from|&|\+|by|or|de|vs\.'
+        pat2 = '((?:[A-HJ-Z0-9][^\s]*(?:\s+(?:[A-Z0-9.\-\(][^\s]*|' + stop_words + ')|$)|I [A-Z0-9])(?:.*[A-Z0-9][^\s]*)?\s*(?:\(\d{4}\))?)'
+        potential_titles = re.findall(pat1, text)
+        potential_titles.extend(re.findall(pat2, text))
+        potential_titles = list(set(potential_titles))
       else:
         potential_titles = re.findall('"(.*?)"', text)
       return potential_titles
@@ -244,13 +342,35 @@ class Chatbot:
       """
       candidates = []
       if self.creative:
-        pass
+        movie = extract_titles_and_year(title)
+        for i in range(len(self.movies)):
+          match_found = False
+          for mt in self.movies[i].titles:
+            for t in movie.titles:
+              # if database title starts with query title
+              if bool(re.match(t + '($|\s)', mt, re.I)):
+                match_found = True
+                self.prefix_match_found = True
+                break
+            if match_found:
+              break
+          if match_found:
+            # if no year included in query, add all movies that match
+            if not movie.year:
+              candidates.append(i)
+            # if year included in query, add only movies that match both
+            # title AND year
+            if movie.year and movie.year == self.movies[i].year:
+              candidates.append(i)
+              self.prefix_match_found = True
       else:
         movie = extract_titles_and_year(title)
         for i in range(len(self.movies)):
           if set(movie.titles).intersection(set(self.movies[i].titles)):
-            candidates.append(i)
-            if movie.year and movie.year == self.movies[i].year:
+            if not movie.year:
+              candidates.append(i)
+            elif movie.year and movie.year == self.movies[i].year:
+              candidates.append(i)
               return candidates
       return candidates
 
@@ -272,7 +392,7 @@ class Chatbot:
       :param text: a user-supplied line of text
       :returns: a numerical value for the sentiment of the text
       """
-      return 0
+      return 1
 
     def extract_sentiment_for_movies(self, text):
       """Creative Feature: Extracts the sentiments from a line of text
@@ -310,8 +430,30 @@ class Chatbot:
       :param max_distance: the maximum edit distance to search for
       :returns: a list of movie indices with titles closest to the given title and within edit distance max_distance
       """
-
-      pass
+      candidates = []
+      movie = extract_titles_and_year(title)
+      for i in range(len(self.movies)):
+        match_found = False
+        #full_title = self.movies[i].titles[0]
+        for mt in self.movies[i].titles:  
+          for t in movie.titles:
+            dist = edit_distance(t, mt)#full_title)
+            if dist <= max_distance:
+              match_found = True
+              # if distance is smaller than all previous, discard previous
+              if dist < max_distance:
+                candidates = []
+                max_distance = dist
+              break
+          if match_found:
+            break
+        if match_found:
+          if not movie.year:
+            candidates.append(i)
+          if movie.year and movie.year == self.movies[i].year:
+            candidates.append(i)
+            return candidates
+      return candidates
 
     def disambiguate(self, clarification, candidates):
       """Creative Feature: Given a list of movies that the user could be talking about 
