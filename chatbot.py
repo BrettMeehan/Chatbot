@@ -345,12 +345,11 @@ class Chatbot:
         movie = extract_titles_and_year(title)
         for i in range(len(self.movies)):
           match_found = False
-          for mt in self.movies[i].titles:
-            for t in movie.titles:
+          for dbt in self.movies[i].titles:
+            for qt in movie.titles:
               # if database title starts with query title
-              if bool(re.match(t + '($|\s)', mt, re.I)):
+              if bool(re.match(qt + '($|\W)', dbt, re.I)):
                 match_found = True
-                self.prefix_match_found = True
                 break
             if match_found:
               break
@@ -358,6 +357,7 @@ class Chatbot:
             # if no year included in query, add all movies that match
             if not movie.year:
               candidates.append(i)
+              self.prefix_match_found = True
             # if year included in query, add only movies that match both
             # title AND year
             if movie.year and movie.year == self.movies[i].year:
@@ -435,9 +435,9 @@ class Chatbot:
       for i in range(len(self.movies)):
         match_found = False
         #full_title = self.movies[i].titles[0]
-        for mt in self.movies[i].titles:  
-          for t in movie.titles:
-            dist = edit_distance(t, mt)#full_title)
+        for dbt in self.movies[i].titles:  
+          for qt in movie.titles:
+            dist = edit_distance(qt, dbt)#full_title)
             if dist <= max_distance:
               match_found = True
               # if distance is smaller than all previous, discard previous
