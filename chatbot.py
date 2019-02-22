@@ -558,7 +558,38 @@ class Chatbot:
       #######################################################################################
 
       # Populate this list with k movie indices to recommend to the user.
-      recommendations = []
+
+      user_ratings = self.binarize(user_ratings)
+      ratings_matrix = self.binarize(ratings_matrix)
+
+      unseen_movies = np.where(user_ratings == 0)[0]
+      liked_movies = np.where(user_ratings == 1)[0]
+
+      ratings_matrix_full = np.insert(ratings_matrix, 0, user_ratings, axis = 1)
+
+      rating_unseen = []
+
+      for i in unseen_movies:
+        unseen_vector = ratings_matrix_full[i, :]
+        weights = []
+        ratings = []
+        for j in liked_movies:
+          liked_vector = ratings_matrix_full[j, :]
+          weight = self.similarity(unseen_vector, liked_vector)
+          weights.append(weight)
+          ratings.append(user_ratings[j])
+        score = float(np.dot(weights, ratings.T))
+        ratings_unseen.append([i, score])
+
+     rating_unseen.sort(key = lambda x:x[1], reverse = True)
+
+     recommendations = []
+
+     for i in range(k):
+      recommendations.append(rating_unseen[i][0])
+
+
+      
 
       #############################################################################
       #                             END OF YOUR CODE                              #
