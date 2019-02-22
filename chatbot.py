@@ -499,7 +499,7 @@ class Chatbot:
       #############################################################################
 
       # The starter code returns a new matrix shaped like ratings but full of zeros.
-      binarized_ratings = np.zeros_like(ratings)
+      binarized_ratings = np.where(ratings > threshold, 1.0, 0.0) + np.where((ratings != 0.0) & (ratings <= threshold), -1.0, 0.0) 
 
       #############################################################################
       #                             END OF YOUR CODE                              #
@@ -520,7 +520,10 @@ class Chatbot:
       #############################################################################
       # TODO: Compute cosine similarity between the two vectors.
       #############################################################################
-      similarity = 0
+      u_norm = np.linalg.norm(u,2)
+      v_norm = np.linalg.norm(v,2)
+      dot_prod = np.dot(u, v.T)
+      similarity = float(dot_prod/(u_norm*v_norm))
       #############################################################################
       #                             END OF YOUR CODE                              #
       #############################################################################
