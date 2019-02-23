@@ -123,16 +123,24 @@ class Chatbot:
       self.titles, ratings = movielens.ratings()
       self.sentiment = movielens.sentiment()
 
-      # a tuple with the index(es) of the current movie being discussed 
-      self.current_movie = None
       # a tuple with the sentiment of the movie being discussed
       self.current_sentiment = None
+      # the movie title entered by the user
+      self.current_title = None
+      # a list of current movie candidates
+      self.current_idxs = []
+
+
+      self.prev_movie = None
+      self.prev_sentiment = None
+
       # a list of (movie, sentiment) tuples that the user has described and
       # the chatbot has processed
       self.user_movies = []
       self.user_movie_set = set()
 
       self.prefix_match_found = False
+      self.disambig = False
 
       # preprocess movie list by extracting possible titles and year
       self.movies = []
@@ -208,17 +216,71 @@ class Chatbot:
       # it is highly recommended.                                                 #
       #############################################################################
       response = ''
-      # extract titles and matches
-      matches = self.get_possible_matching_titles(line)
-      # extract sentiment
-      sentiment = self.extract_sentiment(line)
 
       if self.creative:
-        if len(matches) == 0:
-          return self.generate_response_to_irrelevant_input()
-        else:
-          response = "You are talking about: " +\
-                     ', '.join('{}'.format(k) for k in matches)
+        # deal with "Can you...?", "What is...?" questions
+        response_to_question = self.matches_question(line)
+        if response_to_question:
+          return response_to_question
+        elif self.disambig:
+          self.current_idxs = self.disambiguate(line, self.current_idxs)
+          if len(self.current_idxs) == 1:
+            self.disambig = False
+          else:
+            response = "Sorry, can you be a little more specific? I still found the following movies:\n"
+            for i in self.current_idxs:
+              response += "{}\n".format(self.titles[i][0])
+            return response
+
+      # extract titles and matches
+      if not self.current_title:
+        matches = self.get_possible_matching_titles(line)
+      else:
+        matches = [(self.current_title, self.current_idxs)]
+      # extract sentiment
+      if not self.current_sentiment:
+        # remove title from line for sentiment extraction
+        if matches:
+          line = line.replace(matches[0][0], '')
+        sentiment = self.extract_sentiment(line)
+        self.sentiment = sentiment
+      else:
+        sentiment = self.current_sentiment
+
+      if self.creative:
+        if len(matches) == 0 and not self.current_title:
+            return self.generate_response_to_irrelevant_input()
+        elif len(matches) > 1:
+          return 'Please tell me about one movie at a time.'
+        elif len(matches) == 1:
+          title, idxs = matches[0]
+          self.current_idxs = idxs
+          self.current_title = title
+          if sentiment == 0:
+            return "What did you think about {}?".format(title)
+          else:
+            if len(idxs) == 0:
+              return "Hmm, I couldn't find a match for {}. Please tell me about some other movies you have watched!".format(title)
+            elif len(idxs) == 1:
+              if idxs[0] in self.user_movie_set:
+                response = "I think you already told me about that movie."
+                self.clear_current_movie()
+              else:
+                if sentiment == 1:
+                  response = "Great, so you liked {}.".format(self.titles[idxs[0]][0])
+                elif sentiment == 2:
+                  response = "Wow, you really loved {}!".format(self.titles[idxs[0]][0])
+                elif sentiment == -1:
+                  response = "Okay, you didn't like {}.".format(self.titles[idxs[0]][0])
+                elif sentiment == -2:
+                  response = "It seems like you hated {} with a passion! That's too bad.".format(self.titles[idxs[0]][0])
+                self.process_movie(idxs[0], sentiment)
+            else:
+              response = "I found multiple movies. Which one are you talking about?\n"
+              for i in idxs:
+                response += '{}\n'.format(self.titles[i][0])
+              self.disambig = True
+              return response
       else:
         if len(matches) == 0:
           return self.generate_response_to_irrelevant_input() 
@@ -241,8 +303,14 @@ class Chatbot:
                 else:
                   response = "Great! So you liked {}. ".format(title)
                   self.process_movie(idxs[0], sentiment)
+              elif sentiment < 0:
+                if idxs[0] in self.user_movie_set:
+                  response = "I think you already told me about that movie."
+                else:
+                  response = "Okay, so you didn't like {}. ".format(title)
+                  self.process_movie(idxs[0], sentiment)
               else:
-                response = "Okay, so you didn't like {}. ".format(title)
+                return "I'm not sure if you liked or didn't the movie. Can you tell me a movie and what you thought about it?"
             
       # recommend once we have 5 movies
       if len(self.user_movies) >= 5:
@@ -253,6 +321,14 @@ class Chatbot:
       #                             END OF YOUR CODE                              #
       #############################################################################
       return response
+
+    def matches_question(self, text):
+      '''
+      Returns response to question
+      ''' 
+      pass
+
+      return ''
 
     def generate_response_to_irrelevant_input(self):
       responses = [
@@ -289,8 +365,14 @@ class Chatbot:
     def process_movie(self, movie_index, sentiment):
       self.user_movies.append((movie_index, sentiment))
       self.user_movie_set.add(movie_index)
-      self.current_movie = None
+      self.prev_idx = movie_index
+      self.prev_sentiment = self.current_sentiment
+      self.clear_current_movie()    
+
+    def clear_current_movie(self):
       self.current_sentiment = None
+      self.current_title = None
+      self.current_idxs = None
 
     def extract_titles(self, text):
       """Extract potential movie titles from a line of text.
@@ -474,7 +556,16 @@ class Chatbot:
       :param candidates: a list of movie indices
       :returns: a list of indices corresponding to the movies identified by the clarification
       """
-      pass
+      filtered_idxs = []
+      for idx in candidates:
+        if bool(re.search('(\W|^)' + clarification + '(\W|$)', self.titles[idx][0], 
+                          re.I)):
+          filtered_idxs.append(idx)
+
+      if not filtered_idxs:
+        return candidates
+      else:
+        return filtered_idxs
 
 
     #############################################################################
