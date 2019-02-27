@@ -665,7 +665,7 @@ class Chatbot:
     # 3. Movie Recommendation helper functions                                  #
     #############################################################################
 
-    def binarize(self, ratings, threshold=2.5):
+    def binarize(self, ratings, threshold=2.5, creative=False):
       """Return a binarized version of the given matrix.
 
       To binarize a matrix, replace all entries above the threshold with 1.
@@ -683,7 +683,14 @@ class Chatbot:
       #############################################################################
 
       # The starter code returns a new matrix shaped like ratings but full of zeros.
-      binarized_ratings = np.where(ratings > threshold, 1.0, 0.0) + np.where((ratings != 0.0) & (ratings <= threshold), -1.0, 0.0) 
+      if creative: 
+        high_thresh = 4
+        low_thresh = 5-high_thresh
+        binarized_ratings = np.where(ratings >= high_thresh, 2.0, 0.0) + np.where((ratings > threshold) & (ratings < high_thresh),1.0,0.0) + np.where((ratings <= threshold) & (ratings > low_thresh),-1.0,0.0) + np.where((ratings != 0.0) & (ratings <= low_thresh), -2.0, 0.0) 
+
+      else:
+        binarized_ratings = np.where(ratings > threshold, 1.0, 0.0) + np.where((ratings != 0.0) & (ratings <= threshold), -1.0, 0.0) 
+
 
       #############################################################################
       #                             END OF YOUR CODE                              #
