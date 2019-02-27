@@ -181,7 +181,7 @@ class Chatbot:
       # TODO: Write a short greeting message                                      #
       #############################################################################
 
-      greeting_message = "How can I help you?"
+      greeting_message = "Hi there! I'm Movie Chatbot. How can I help you?"
 
       #############################################################################
       #                             END OF YOUR CODE                              #
@@ -194,7 +194,7 @@ class Chatbot:
       # TODO: Write a short farewell message                                      #
       #############################################################################
 
-      goodbye_message = "Have a nice day!"
+      goodbye_message = "Have a nice day! It was fun talking to you!"
 
       #############################################################################
       #                             END OF YOUR CODE                              #
@@ -307,7 +307,7 @@ class Chatbot:
               response = "(I think you already told me about that movie, but I'll update what you tell me!)\n"
             
             if sentiment == 0:
-              return response + "What did you think about \"{}\"?".format(title)
+              return response + "What did you think about \"{}\"?".format(self.titles[idxs[0]][0])
             if sentiment == 1:
               response += "Great, so you liked \"{}\".".format(self.titles[idxs[0]][0])
             elif sentiment == 2:
@@ -332,7 +332,7 @@ class Chatbot:
           title, idxs = matches[0]
           sentiment = self.extract_sentiment(line.replace(title, ''))
           if sentiment == 0:
-            return "So did you like \"{}\" or hate it? Please tell me.".format(title)
+            return "So did you like \"{}\" or hate it? Please tell me.".format(self.titles[idxs[0]][0])
           else:
             if len(idxs) > 1:
               return "I found multiple matches for \"{}\". Can you be more specific? Maybe try telling me the year as well.".format(title)
@@ -343,13 +343,13 @@ class Chatbot:
                 if idxs[0] in self.user_movie_set:
                   response = "(I think you already told me about that movie, but I'll update what you tell me!)\n"
                 else:
-                  response = "Great! So you liked \"{}\". ".format(title)
+                  response = "Great! So you liked \"{}\". ".format(self.titles[idxs[0]][0])
                 self.process_movie(idxs[0], sentiment)
               elif sentiment < 0:
                 if idxs[0] in self.user_movie_set:
                   response = "I think you already told me about that movie."
                 else:
-                  response = "Okay, so you didn't like \"{}\". ".format(title)
+                  response = "Okay, so you didn't like \"{}\". ".format(self.titles[idxs[0]][0])
                   self.process_movie(idxs[0], sentiment)
               else:
                 return "I'm not sure if you liked or didn't the movie. Can you tell me a movie and what you thought about it?"
@@ -381,14 +381,17 @@ class Chatbot:
     def matches_question(self, text):
       '''
       Returns response to question
-      ''' 
-      match = re.findall('Can (.*)\?', text, re.I)
+      '''
+      question_responses = [
+                            "I don't know. Ask Google.",
+                            "I'd like to know as well.",
+                            "Let me think about that. I'll get back to you in a billion years."
+                           ] 
+      match = re.findall('(.*)\?', text, re.I)
       if match:
-        return self.flip_question(text) + " I don't know. Ask Google."
-      
-      match = re.findall('Will (.*)\?', text, re.I)
-      if match:
-        return self.flip_question(text) + " I'd like to know as well."
+        return self.flip_question(text) + ' ' + question_responses[random.randint(0, len(question_responses) - 1)] 
+      else:
+        return None      
 
     def flip_question(self, text):
       '''
@@ -654,7 +657,39 @@ class Chatbot:
         if bool(re.search('(\W|^)' + clarification + '(\W|$)', self.titles[idx][0], 
                           re.I)):
           filtered_idxs.append(idx)
-
+      # try looking for phrases like 'first one' or '2nd movie'
+      if not filtered_idxs:
+        if bool(re.search('(\W|^)(first|1st)(\W|$)', clarification, re.I)) and \
+           len(candidates) >= 1:
+          filtered_idxs = [candidates[0]]
+        elif bool(re.search('(\W|^)(second|2nd)(\W|$)', clarification, re.I)) and \
+           len(candidates) >= 2:
+          filtered_idxs = [candidates[1]]
+        elif bool(re.search('(\W|^)(third|3rd)(\W|$)', clarification, re.I)) and \
+           len(candidates) >= 3:
+          filtered_idxs = [candidates[2]]
+        elif bool(re.search('(\W|^)(fourth|4th)(\W|$)', clarification, re.I)) and \
+           len(candidates) >= 4:
+          filtered_idxs = [candidates[3]]
+        elif bool(re.search('(\W|^)(fifth|5th)(\W|$)', clarification, re.I)) and \
+           len(candidates) >= 5:
+          filtered_idxs = [candidates[4]]
+        elif bool(re.search('(\W|^)(sixth|6th)(\W|$)', clarification, re.I)) and \
+           len(candidates) >= 6:
+          filtered_idxs = [candidates[5]]
+        elif bool(re.search('(\W|^)(seventh|7th)(\W|$)', clarification, re.I)) and \
+           len(candidates) >= 7:
+          filtered_idxs = [candidates[6]]
+        elif bool(re.search('(\W|^)(eighth|8th)(\W|$)', clarification, re.I)) and \
+           len(candidates) >= 8:
+          filtered_idxs = [candidates[7]]
+        elif bool(re.search('(\W|^)(ninth|9th)(\W|$)', clarification, re.I)) and \
+           len(candidates) >= 9:
+          filtered_idxs = [candidates[8]]
+        elif bool(re.search('(\W|^)(tenth|10th)(\W|$)', clarification, re.I)) and \
+           len(candidates) >= 10:
+          filtered_idxs = [candidates[9]]
+      
       if not filtered_idxs:
         return candidates
       else:
