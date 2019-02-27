@@ -140,13 +140,22 @@ class Chatbot:
       self.prev_movie = None
       self.prev_sentiment = None
 
-      # a list of (movie, sentiment) tuples that the user has described and
-      # the chatbot has processed
-      self.user_movies = []
+      # a dict where dict[i] = j is the user's sentiment j for movie index i 
+      # for movies that the user has described and the chatbot has processed
+      self.user_movies = {}
+
+      # a set of movie indexes that the user has already described
       self.user_movie_set = set()
 
       self.prefix_match_found = False
       self.disambig = False
+
+      # if chatbot is in recommend mode, only respond to yes or no
+      self.recommend_mode = False
+
+      # a list of recommendations for the user
+      self.recommendations = []
+      self.recommend_idx = 0
 
       # preprocess movie list by extracting possible titles and year
       self.movies = []
@@ -224,6 +233,14 @@ class Chatbot:
       response = ''
       #print('--------------------------------------------------')
 
+      if self.recommend_mode:
+        if re.match('yes', line.strip(), re.I):
+          return self.give_recommendation()
+        elif re.match('no', line.strip(), re.I):
+          return "Okay, I guess I've given you enough recommendations"
+        else:
+          return self.generate_response_to_irrelevant_input()
+
       clarification = False
       if self.creative:
         # deal with "Can you...?", "What is...?", etc. questions
@@ -287,20 +304,19 @@ class Chatbot:
             return "Hmm, I couldn't find a match for \"{}\". Please tell me about some other movies you have watched!".format(title)
           elif len(idxs) == 1:
             if idxs[0] in self.user_movie_set:
-              response = "I think you already told me about that movie."
-              self.clear_current_movie()
-            else:
-              if sentiment == 0:
-                return "What did you think about \"{}\"?".format(title)
-              if sentiment == 1:
-                response = "Great, so you liked \"{}\".".format(self.titles[idxs[0]][0])
-              elif sentiment == 2:
-                response = "Wow, you really loved \"{}\"!".format(self.titles[idxs[0]][0])
-              elif sentiment == -1:
-                response = "Okay, you didn't like \"{}\".".format(self.titles[idxs[0]][0])
-              elif sentiment == -2:
-                response = "It seems like you hated \"{}\" with a passion! That's too bad.".format(self.titles[idxs[0]][0])
-              self.process_movie(idxs[0], sentiment)
+              response = "(I think you already told me about that movie, but I'll update what you tell me!)\n"
+            
+            if sentiment == 0:
+              return response + "What did you think about \"{}\"?".format(title)
+            if sentiment == 1:
+              response += "Great, so you liked \"{}\".".format(self.titles[idxs[0]][0])
+            elif sentiment == 2:
+              response += "Wow, you really loved \"{}\"!".format(self.titles[idxs[0]][0])
+            elif sentiment == -1:
+              response += "Okay, you didn't like \"{}\".".format(self.titles[idxs[0]][0])
+            elif sentiment == -2:
+              response += "It seems like you hated \"{}\" with a passion! That's too bad.".format(self.titles[idxs[0]][0])
+            self.process_movie(idxs[0], sentiment)
           else:
             response = "I found multiple movies. Which one are you talking about?\n"
             for i in idxs:
@@ -325,10 +341,10 @@ class Chatbot:
             else:
               if sentiment > 0:
                 if idxs[0] in self.user_movie_set:
-                  response = "I think you already told me about that movie."
+                  response = "(I think you already told me about that movie, but I'll update what you tell me!)\n"
                 else:
                   response = "Great! So you liked \"{}\". ".format(title)
-                  self.process_movie(idxs[0], sentiment)
+                self.process_movie(idxs[0], sentiment)
               elif sentiment < 0:
                 if idxs[0] in self.user_movie_set:
                   response = "I think you already told me about that movie."
@@ -340,19 +356,27 @@ class Chatbot:
             
       # recommend once we have 5 movies
       if len(self.user_movies) >= 5:
+        self.recommend_mode = True
         user_ratings = np.zeros(len(self.titles))
         for m in self.user_movies:
-          user_ratings[m[0]] = m[1]
-        recommendations = self.recommend(user_ratings, self.bin_ratings, k=5, creative=self.creative)
-        response += '\nBased on what you told me, here are some movies you might like!:\n'
-        for idx in recommendations:
-          response += '{}\n'.format(self.titles[idx][0])
+          user_ratings[m] = self.user_movies[m]
+        self.recommendations = self.recommend(user_ratings, self.bin_ratings, k=10, creative=self.creative)
+        self.recommend_idx = 0
+        return self.give_recommendation()
       else:
         response += " " + self.generate_request_for_more_movies()   
       #############################################################################
       #                             END OF YOUR CODE                              #
       #############################################################################
       return response
+    
+    def give_recommendation(self):
+      if self.recommend_idx < len(self.recommendations):
+        response = "Based on what you told me, I think you would like \"{}\"\n".format(self.titles[self.recommendations[self.recommend_idx]][0])
+        response += 'Would you like another recommendation?'
+        self.recommend_idx += 1
+      else:
+        return "Sorry, I don't have any more recommendations!"
 
     def matches_question(self, text):
       '''
@@ -416,10 +440,10 @@ class Chatbot:
         self.prefix_match_found = False
         for title in possible_titles:
           movie_idxs = self.find_movies_by_title(title)
-          print(movie_idxs)
+          #print(movie_idxs)
           if not self.prefix_match_found:
             movie_idxs.extend(self.find_movies_closest_to_title(title, max_distance=3))
-            print(movie_idxs)
+            #print(movie_idxs)
             movie_idxs = sorted(list(set(movie_idxs)))
           matches.append((title, movie_idxs))
       else: 
@@ -428,7 +452,7 @@ class Chatbot:
       return matches
 
     def process_movie(self, movie_index, sentiment):
-      self.user_movies.append((movie_index, sentiment))
+      self.user_movies[movie_index] = sentiment
       self.user_movie_set.add(movie_index)
       self.prev_idx = movie_index
       self.prev_sentiment = self.current_sentiment
@@ -718,10 +742,6 @@ class Chatbot:
       #######################################################################################
 
       # Populate this list with k movie indices to recommend to the user.
-
-      user_ratings = self.binarize(user_ratings)
-      ratings_matrix = self.binarize(ratings_matrix)
-
       unseen_movies = np.where(user_ratings == 0)[0]
       liked_movies = np.where(user_ratings == 1)[0]
 
