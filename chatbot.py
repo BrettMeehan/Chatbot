@@ -7,6 +7,8 @@ import movielens
 import numpy as np
 import re
 import random
+import nltk
+from PorterStemmer import PorterStemmer
 
 class Movie:
     def __init__(self):
@@ -122,11 +124,19 @@ class Chatbot:
       # movie i by user j
       self.titles, ratings = movielens.ratings()
       self.sentiment = movielens.sentiment()
+      self.new_sentiment = {}
+      self.p = PorterStemmer()
+
+      for key in self.sentiment:
+        old_key = key
+        new_key = self.p.stem(key)
+        self.new_sentiment[new_key] = self.sentiment[old_key]
 
       # a tuple with the index(es) of the current movie being discussed 
       self.current_movie = None
       # a tuple with the sentiment of the movie being discussed
       self.current_sentiment = None
+
       # a list of (movie, sentiment) tuples that the user has described and
       # the chatbot has processed
       self.user_movies = []
@@ -374,6 +384,13 @@ class Chatbot:
               return candidates
       return candidates
 
+    class Example:
+      """Represents a document with a label. klass is 'pos' or 'neg' by convention.
+          words is a list of strings.
+      """
+      def __init__(self):
+          self.klass = ''
+          self.words = []
 
     def extract_sentiment(self, text):
       """Extract a sentiment rating from a line of text.
@@ -392,7 +409,60 @@ class Chatbot:
       :param text: a user-supplied line of text
       :returns: a numerical value for the sentiment of the text
       """
-      return 1
+
+      #process train data 
+
+      negationList = ["n't", "never", "not", "no"]
+      strongerList = ["really", "very", "love", "hate", "terrible"]
+      strongNounList = ["love", "hate", "terrible"]
+      punct = "\W+"
+      
+
+      textWords = nltk.word_tokenize(text)
+      #find where negation starts
+      #textWords = addNegation(text)
+
+      #if  newText:
+        #text = newText
+          
+      #textWords = list(filter(None, re.split('\W+', text.strip())))
+      #print(textWords)
+
+      #train data
+
+       
+      opp = False
+      pos_num = 0
+      neg_num = 0
+      strength_val = 1
+
+      for word in textWords:
+        if word in negationList:
+          opp = True
+          continue
+        if re.match(punct, word):
+          opp = False
+          continue
+        if word in strongerList:
+          strength_val = 2
+        word = self.p.stem(word)
+        if word in self.new_sentiment:
+          if self.new_sentiment[word] == 'pos' and not opp:
+            pos_num += strength_val
+          elif self.new_sentiment[word] == 'pos' and opp:
+            neg_num += strength_val
+          elif self.new_sentiment[word] == 'neg' and not opp:
+            neg_num += strength_val
+          else:
+            pos_num += strength_val
+
+      if pos_num == neg_num:
+        return 0
+      elif max(pos_num, neg_num) == pos_num:
+        return 1
+
+      return -1 
+
 
     def extract_sentiment_for_movies(self, text):
       """Creative Feature: Extracts the sentiments from a line of text
