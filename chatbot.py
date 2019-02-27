@@ -73,8 +73,6 @@ def extract_titles_and_year(title):
   all_titles.append(title)
   if pats:
     all_titles.append(alt_name)
-#  if ':' in title:
-#    all_titles.extend(title.split(':'))
 
   # strip whitespace, change [&+] to "and", move articles to end
   for i in range(len(all_titles)):
@@ -110,6 +108,13 @@ def move_article_to_end(title):
     title = title[4:] + ', ' + 'Los'
   return title
 
+def contains_anaphoric_expression(text):
+  '''
+  Checks a few patterns to make sure user text contains an anaphoric expression
+  '''
+  pat1 = '(\W|^)(it|the movie|that)(\W|$)'
+  return bool(re.search(pat1, text, re.I))
+
 class Chatbot:
     """Simple class to implement the chatbot for PA 6."""
 
@@ -132,17 +137,35 @@ class Chatbot:
         new_key = self.p.stem(key)
         self.new_sentiment[new_key] = self.sentiment[old_key]
 
-      # a tuple with the index(es) of the current movie being discussed 
-      self.current_movie = None
+      self.bin_ratings = self.binarize(ratings)
+
       # a tuple with the sentiment of the movie being discussed
       self.current_sentiment = None
+      # the movie title entered by the user
+      self.current_title = None
+      # a list of current movie candidates
+      self.current_idxs = []
 
-      # a list of (movie, sentiment) tuples that the user has described and
-      # the chatbot has processed
-      self.user_movies = []
+
+      self.prev_movie = None
+      self.prev_sentiment = None
+
+      # a dict where dict[i] = j is the user's sentiment j for movie index i 
+      # for movies that the user has described and the chatbot has processed
+      self.user_movies = {}
+
+      # a set of movie indexes that the user has already described
       self.user_movie_set = set()
 
       self.prefix_match_found = False
+      self.disambig = False
+
+      # if chatbot is in recommend mode, only respond to yes or no
+      self.recommend_mode = False
+
+      # a list of recommendations for the user
+      self.recommendations = []
+      self.recommend_idx = 0
 
       # preprocess movie list by extracting possible titles and year
       self.movies = []
@@ -168,7 +191,7 @@ class Chatbot:
       # TODO: Write a short greeting message                                      #
       #############################################################################
 
-      greeting_message = "How can I help you?"
+      greeting_message = "Hi there! I'm Movie Chatbot. How can I help you?"
 
       #############################################################################
       #                             END OF YOUR CODE                              #
@@ -181,7 +204,7 @@ class Chatbot:
       # TODO: Write a short farewell message                                      #
       #############################################################################
 
-      goodbye_message = "Have a nice day!"
+      goodbye_message = "Have a nice day! It was fun talking to you!"
 
       #############################################################################
       #                             END OF YOUR CODE                              #
@@ -218,17 +241,98 @@ class Chatbot:
       # it is highly recommended.                                                 #
       #############################################################################
       response = ''
+      #print('--------------------------------------------------')
+
+      if self.recommend_mode:
+        if re.match('yes', line.strip(), re.I):
+          return self.give_recommendation()
+        elif re.match('no', line.strip(), re.I):
+          return "Okay, I guess I've given you enough recommendations"
+        else:
+          return self.generate_response_to_irrelevant_input()
+
+      clarification = False
+      if self.creative:
+        # deal with "Can you...?", "What is...?", etc. questions
+        response_to_question = self.matches_question(line)
+        if response_to_question:
+          return response_to_question
+        elif self.disambig:
+          self.current_idxs = self.disambiguate(line, self.current_idxs)
+          #print(self.current_idxs)
+          if len(self.current_idxs) == 1:
+            self.current_title = self.titles[self.current_idxs[0]][0]
+            self.disambig = False
+            clarification = True
+          else:
+            response = "Sorry, can you be a little more specific? I still found the following movies:\n"
+            for i in self.current_idxs:
+              response += "{}\n".format(self.titles[i][0])
+            return response
+
       # extract titles and matches
-      matches = self.get_possible_matching_titles(line)
+      extracted_title_from_current_line = False
+      if not self.current_title:
+        matches = self.get_possible_matching_titles(line)
+        extracted_title_from_current_line = True
+        #print('Extracted title')
+      else:
+        matches = [(self.current_title, self.current_idxs)]
+      #print('Current title:{}'.format(self.current_title))
       # extract sentiment
-      sentiment = self.extract_sentiment(line)
+      extracted_sentiment_from_current_line = False
+      if not self.current_sentiment:
+        # remove title from line for sentiment extraction
+        if matches:
+          line = line.replace(matches[0][0], '')
+        sentiment = self.extract_sentiment(line)
+        extracted_sentiment_from_current_line = True
+        self.current_sentiment = sentiment
+        #print('Extracted sentiment')
+      else:
+        sentiment = self.current_sentiment
+      #print('Current sentiment:{}'.format(self.current_sentiment))
 
       if self.creative:
-        if len(matches) == 0:
-          return self.generate_response_to_irrelevant_input()
-        else:
-          response = "You are talking about: " +\
-                     ', '.join('{}'.format(k) for k in matches)
+        if not extracted_title_from_current_line and \
+           extracted_sentiment_from_current_line:
+           if not clarification and not contains_anaphoric_expression(line):
+             #print('no anaphoric expression')
+             return self.generate_response_to_irrelevant_input()
+
+      if self.creative:
+        if len(matches) == 0 and not self.current_title:
+            return self.generate_response_to_irrelevant_input()
+        elif len(matches) > 1:
+          return 'Please tell me about one movie at a time.'
+        elif len(matches) == 1:
+          title, idxs = matches[0]
+          self.current_idxs = idxs
+          self.current_title = title
+          if len(idxs) == 0:
+            self.clear_current_movie()
+            return "Hmm, I couldn't find a match for \"{}\". Please tell me about some other movies you have watched!".format(title)
+          elif len(idxs) == 1:
+            if idxs[0] in self.user_movie_set:
+              response = "(I think you already told me about that movie, but I'll update what you tell me!)\n"
+            
+            if sentiment == 0:
+              return response + "What did you think about \"{}\"?".format(self.titles[idxs[0]][0])
+            if sentiment == 1:
+              response += "Great, so you liked \"{}\".".format(self.titles[idxs[0]][0])
+            elif sentiment == 2:
+              response += "Wow, you really loved \"{}\"!".format(self.titles[idxs[0]][0])
+            elif sentiment == -1:
+              response += "Okay, you didn't like \"{}\".".format(self.titles[idxs[0]][0])
+            elif sentiment == -2:
+              response += "It seems like you hated \"{}\" with a passion! That's too bad.".format(self.titles[idxs[0]][0])
+            self.process_movie(idxs[0], sentiment)
+          else:
+            response = "I found multiple movies. Which one are you talking about?\n"
+            for i in idxs:
+              response += '{}\n'.format(self.titles[i][0])
+            self.disambig = True
+            return response
       else:
         if len(matches) == 0:
           return self.generate_response_to_irrelevant_input() 
@@ -238,31 +342,93 @@ class Chatbot:
           title, idxs = matches[0]
           sentiment = self.extract_sentiment(line.replace(title, ''))
           if sentiment == 0:
-            return "So did you like {} or hate it? Please tell me.".format(title)
+            return "So did you like \"{}\" or hate it? Please tell me.".format(self.titles[idxs[0]][0])
           else:
             if len(idxs) > 1:
-              return "I found multiple matches for {}. Can you be more specific? Maybe try telling me the year as well.".format(title)
+              return "I found multiple matches for \"{}\". Can you be more specific? Maybe try telling me the year as well.".format(title)
             elif len(idxs) == 0:
-              return "Hmm, I couldn't find a match for {}. Please tell me about some other movies you have watched!".format(title)
+              return "Hmm, I couldn't find a match for \"{}\". Please tell me about some other movies you have watched!".format(title)
             else:
               if sentiment > 0:
                 if idxs[0] in self.user_movie_set:
+                  response = "(I think you already told me about that movie, but I'll update what you tell me!)\n"
+                else:
+                  response = "Great! So you liked \"{}\". ".format(self.titles[idxs[0]][0])
+                self.process_movie(idxs[0], sentiment)
+              elif sentiment < 0:
+                if idxs[0] in self.user_movie_set:
                   response = "I think you already told me about that movie."
                 else:
-                  response = "Great! So you liked {}. ".format(title)
+                  response = "Okay, so you didn't like \"{}\". ".format(self.titles[idxs[0]][0])
                   self.process_movie(idxs[0], sentiment)
               else:
-                response = "Okay, so you didn't like {}. ".format(title)
+                return "I'm not sure if you liked or didn't the movie. Can you tell me a movie and what you thought about it?"
             
       # recommend once we have 5 movies
       if len(self.user_movies) >= 5:
-        response += ' Recommending movies...'
+        self.recommend_mode = True
+        user_ratings = np.zeros(len(self.titles))
+        for m in self.user_movies:
+          user_ratings[m] = self.user_movies[m]
+        self.recommendations = self.recommend(user_ratings, self.bin_ratings, k=10, creative=self.creative)
+        self.recommend_idx = 0
+        return self.give_recommendation()
       else:
         response += " " + self.generate_request_for_more_movies()   
       #############################################################################
       #                             END OF YOUR CODE                              #
       #############################################################################
       return response
+    
+    def give_recommendation(self):
+      if self.recommend_idx < len(self.recommendations):
+        response = "Based on what you told me, I think you would like \"{}\"\n".format(self.titles[self.recommendations[self.recommend_idx]][0])
+        response += 'Would you like another recommendation?'
+        self.recommend_idx += 1
+      else:
+        return "Sorry, I don't have any more recommendations!"
+
+    def matches_question(self, text):
+      '''
+      Returns response to question
+      '''
+      question_responses = [
+                            "I don't know. Ask Google.",
+                            "I'd like to know as well.",
+                            "Let me think about that. I'll get back to you in a billion years."
+                           ] 
+      match = re.findall('(.*)\?', text, re.I)
+      if match:
+        return self.flip_question(text) + ' ' + question_responses[random.randint(0, len(question_responses) - 1)] 
+      else:
+        return None      
+
+    def flip_question(self, text):
+      '''
+      Flips the perspective of the question
+      '''
+      table = {
+               'I': 'you',
+               'me': 'you',
+               'my': 'your',
+               'your': 'my'
+              }
+      # some common prepositions
+      prep_set = {'of','with','at','from','including','until','against',
+                  'among','towards','upon', 'to'}
+      words = re.split('\s|\?', text)
+      words.pop()# remove empty string at end
+      last_word = None
+      for i in range(len(words)):
+        if words[i] in table:
+          words[i] = table[words[i]]
+        elif words[i] == 'you' or words[i] == 'You':
+          if last_word in prep_set:
+            words[i] = 'me'
+          else:
+            words[i] = 'I'
+        last_word = words[i]
+      return ' '.join(words) + '?'
 
     def generate_response_to_irrelevant_input(self):
       responses = [
@@ -287,8 +453,10 @@ class Chatbot:
         self.prefix_match_found = False
         for title in possible_titles:
           movie_idxs = self.find_movies_by_title(title)
+          #print(movie_idxs)
           if not self.prefix_match_found:
             movie_idxs.extend(self.find_movies_closest_to_title(title, max_distance=3))
+            #print(movie_idxs)
             movie_idxs = sorted(list(set(movie_idxs)))
           matches.append((title, movie_idxs))
       else: 
@@ -297,10 +465,16 @@ class Chatbot:
       return matches
 
     def process_movie(self, movie_index, sentiment):
-      self.user_movies.append((movie_index, sentiment))
+      self.user_movies[movie_index] = sentiment
       self.user_movie_set.add(movie_index)
-      self.current_movie = None
+      self.prev_idx = movie_index
+      self.prev_sentiment = self.current_sentiment
+      self.clear_current_movie()    
+
+    def clear_current_movie(self):
       self.current_sentiment = None
+      self.current_title = None
+      self.current_idxs = None
 
     def extract_titles(self, text):
       """Extract potential movie titles from a line of text.
@@ -324,9 +498,10 @@ class Chatbot:
       potential_titles = []
       if self.creative:
         pat1 = '"(.*?)"'
-        #pat2 = '((?:[A-HJ-Z0-9][^\s]*|I [A-Z0-9])(?:.*[A-Z0-9][^\s]*)?\s*(?:\(\d{4}\))?)'
         stop_words = 'at|as|of|on|to|with|and|the|in|from|&|\+|by|or|de|vs\.'
-        pat2 = '((?:[A-HJ-Z0-9][^\s]*(?:\s+(?:[A-Z0-9.\-\(][^\s]*|' + stop_words + ')|$)|I [A-Z0-9])(?:.*[A-Z0-9][^\s]*)?\s*(?:\(\d{4}\))?)'
+        #pat2 = '((?:[A-HJ-Z0-9][^\s]*(?:\s+(?:[A-Z0-9.\-\(][^\s]*|' + stop_words + ')|$)|I [A-Z0-9])(?:.*[A-Z0-9][^\s]*)?\s*(?:\(\d{4}\))?)'
+        start_pat = '(?:^[A-HJ-Z0-9]\S*(?:\s+(?:[A-Z0-9.\-\(]\S*|' + stop_words + ')|$)'
+        pat2 = '((?:[A-HJ-Z0-9]\S*(?:\s+(?:[A-Z0-9\.\-\(]\S*|' + stop_words + ')?|$)|I [A-Z0-9])(?:.*[A-Z0-9]\S*)?\s*(?:\(\d{4}\))?)'
         potential_titles = re.findall(pat1, text)
         potential_titles.extend(re.findall(pat2, text))
         potential_titles = list(set(potential_titles))
@@ -504,10 +679,9 @@ class Chatbot:
       movie = extract_titles_and_year(title)
       for i in range(len(self.movies)):
         match_found = False
-        #full_title = self.movies[i].titles[0]
         for dbt in self.movies[i].titles:  
           for qt in movie.titles:
-            dist = edit_distance(qt, dbt)#full_title)
+            dist = edit_distance(qt, dbt)
             if dist <= max_distance:
               match_found = True
               # if distance is smaller than all previous, discard previous
@@ -544,14 +718,55 @@ class Chatbot:
       :param candidates: a list of movie indices
       :returns: a list of indices corresponding to the movies identified by the clarification
       """
-      pass
+      filtered_idxs = []
+      for idx in candidates:
+        if bool(re.search('(\W|^)' + clarification + '(\W|$)', self.titles[idx][0], 
+                          re.I)):
+          filtered_idxs.append(idx)
+      # try looking for phrases like 'first one' or '2nd movie'
+      if not filtered_idxs:
+        if bool(re.search('(\W|^)(first|1st)(\W|$)', clarification, re.I)) and \
+           len(candidates) >= 1:
+          filtered_idxs = [candidates[0]]
+        elif bool(re.search('(\W|^)(second|2nd)(\W|$)', clarification, re.I)) and \
+           len(candidates) >= 2:
+          filtered_idxs = [candidates[1]]
+        elif bool(re.search('(\W|^)(third|3rd)(\W|$)', clarification, re.I)) and \
+           len(candidates) >= 3:
+          filtered_idxs = [candidates[2]]
+        elif bool(re.search('(\W|^)(fourth|4th)(\W|$)', clarification, re.I)) and \
+           len(candidates) >= 4:
+          filtered_idxs = [candidates[3]]
+        elif bool(re.search('(\W|^)(fifth|5th)(\W|$)', clarification, re.I)) and \
+           len(candidates) >= 5:
+          filtered_idxs = [candidates[4]]
+        elif bool(re.search('(\W|^)(sixth|6th)(\W|$)', clarification, re.I)) and \
+           len(candidates) >= 6:
+          filtered_idxs = [candidates[5]]
+        elif bool(re.search('(\W|^)(seventh|7th)(\W|$)', clarification, re.I)) and \
+           len(candidates) >= 7:
+          filtered_idxs = [candidates[6]]
+        elif bool(re.search('(\W|^)(eighth|8th)(\W|$)', clarification, re.I)) and \
+           len(candidates) >= 8:
+          filtered_idxs = [candidates[7]]
+        elif bool(re.search('(\W|^)(ninth|9th)(\W|$)', clarification, re.I)) and \
+           len(candidates) >= 9:
+          filtered_idxs = [candidates[8]]
+        elif bool(re.search('(\W|^)(tenth|10th)(\W|$)', clarification, re.I)) and \
+           len(candidates) >= 10:
+          filtered_idxs = [candidates[9]]
+      
+      if not filtered_idxs:
+        return candidates
+      else:
+        return filtered_idxs
 
 
     #############################################################################
     # 3. Movie Recommendation helper functions                                  #
     #############################################################################
 
-    def binarize(self, ratings, threshold=2.5):
+    def binarize(self, ratings, threshold=2.5, creative=False):
       """Return a binarized version of the given matrix.
 
       To binarize a matrix, replace all entries above the threshold with 1.
@@ -569,7 +784,14 @@ class Chatbot:
       #############################################################################
 
       # The starter code returns a new matrix shaped like ratings but full of zeros.
-      binarized_ratings = np.where(ratings > threshold, 1.0, 0.0) + np.where((ratings != 0.0) & (ratings <= threshold), -1.0, 0.0) 
+      if creative: 
+        high_thresh = 4
+        low_thresh = 5-high_thresh
+        binarized_ratings = np.where(ratings >= high_thresh, 2.0, 0.0) + np.where((ratings > threshold) & (ratings < high_thresh),1.0,0.0) + np.where((ratings <= threshold) & (ratings > low_thresh),-1.0,0.0) + np.where((ratings != 0.0) & (ratings <= low_thresh), -2.0, 0.0) 
+
+      else:
+        binarized_ratings = np.where(ratings > threshold, 1.0, 0.0) + np.where((ratings != 0.0) & (ratings <= threshold), -1.0, 0.0) 
+
 
       #############################################################################
       #                             END OF YOUR CODE                              #
@@ -628,7 +850,36 @@ class Chatbot:
       #######################################################################################
 
       # Populate this list with k movie indices to recommend to the user.
+      unseen_movies = np.where(user_ratings == 0)[0]
+      liked_movies = np.where(user_ratings == 1)[0]
+
+      ratings_matrix_full = np.insert(ratings_matrix, 0, user_ratings, axis = 1)
+
+      ratings_unseen = []
+
+      for i in unseen_movies:
+        unseen_vector = ratings_matrix_full[i, :]
+        weights = []
+        ratings = []
+        for j in liked_movies:
+          liked_vector = ratings_matrix_full[j, :]
+          weight = self.similarity(unseen_vector, liked_vector)
+          weights.append(weight)
+          ratings.append(user_ratings[j])
+        weights = np.asarray(weights)
+        ratings = np.asarray(ratings)
+        score = float(np.dot(weights, ratings.T))
+        ratings_unseen.append([i, score])
+
+      ratings_unseen.sort(key = lambda x:x[1], reverse = True)
+
       recommendations = []
+
+      for i in range(k):
+        recommendations.append(ratings_unseen[i][0])
+
+
+      
 
       #############################################################################
       #                             END OF YOUR CODE                              #
