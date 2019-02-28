@@ -132,10 +132,10 @@ class Chatbot:
       self.new_sentiment = {}
       self.p = PorterStemmer()
 
+      # create a new sentiment dict with stemmed keys
       for key in self.sentiment:
-        old_key = key
         new_key = self.p.stem(key)
-        self.new_sentiment[new_key] = self.sentiment[old_key]
+        self.new_sentiment[new_key] = self.sentiment[key]
 
       self.bin_ratings = self.binarize(ratings)
 
@@ -247,9 +247,9 @@ class Chatbot:
         if re.match('yes', line.strip(), re.I):
           return self.give_recommendation()
         elif re.match('no', line.strip(), re.I):
-          return "Okay, I guess I've given you enough recommendations"
+          return "Okay, I guess I've given you enough recommendations!"
         else:
-          return self.generate_response_to_irrelevant_input()
+          return "Let's talk about that later. Do you want another recommendation?"
 
       clarification = False
       if self.creative:
@@ -317,7 +317,7 @@ class Chatbot:
               response = "(I think you already told me about that movie, but I'll update what you tell me!)\n"
             
             if sentiment == 0:
-              return response + "What did you think about \"{}\"?".format(self.titles[idxs[0]][0])
+              return response + "I'm a little confused. What did you think about \"{}\"?".format(self.titles[idxs[0]][0])
             if sentiment == 1:
               response += "Great, so you liked \"{}\".".format(self.titles[idxs[0]][0])
             elif sentiment == 2:
@@ -381,12 +381,22 @@ class Chatbot:
       return response
     
     def give_recommendation(self):
+      recommend_sentences = ["Why don't you check out \"{}\"? ",
+                             "I think you might enjoy \"{}\"! ",
+                             "\"{}\" might suit your tastes!"
+                             ]
       if self.recommend_idx < len(self.recommendations):
-        response = "Based on what you told me, I think you would like \"{}\"\n".format(self.titles[self.recommendations[self.recommend_idx]][0])
+        response = ''
+        if self.recommend_idx == 0:
+          response += "Okay, based on what you told me, I think you would like \"{}\"! ".format(self.titles[self.recommendations[self.recommend_idx]][0])
+        else:
+          response += recommend_sentences[random.randint(0, len(recommend_sentences) - 1)].format(self.titles[self.recommendations[self.recommend_idx]][0])
         response += 'Would you like another recommendation?'
         self.recommend_idx += 1
       else:
-        return "Sorry, I don't have any more recommendations!"
+        response = "Sorry, I don't have any more recommendations!"
+
+      return response
 
     def matches_question(self, text):
       '''
@@ -499,9 +509,8 @@ class Chatbot:
       if self.creative:
         pat1 = '"(.*?)"'
         stop_words = 'at|as|of|on|to|with|and|the|in|from|&|\+|by|or|de|vs\.'
-        #pat2 = '((?:[A-HJ-Z0-9][^\s]*(?:\s+(?:[A-Z0-9.\-\(][^\s]*|' + stop_words + ')|$)|I [A-Z0-9])(?:.*[A-Z0-9][^\s]*)?\s*(?:\(\d{4}\))?)'
-        start_pat = '(?:^[A-HJ-Z0-9]\S*(?:\s+(?:[A-Z0-9.\-\(]\S*|' + stop_words + ')|$)'
-        pat2 = '((?:[A-HJ-Z0-9]\S*(?:\s+(?:[A-Z0-9\.\-\(]\S*|' + stop_words + ')?|$)|I [A-Z0-9])(?:.*[A-Z0-9]\S*)?\s*(?:\(\d{4}\))?)'
+        #pat2 = '((?:[A-HJ-Z0-9]\S*(?:\s+(?:[A-Z0-9\.\-\(]\S*|' + stop_words + ')?|$)|I [A-Z0-9])(?:.*[A-Z0-9]\S*)?\s*(?:\(\d{4}\))?)'
+        pat2 = '((?:[A-HJ-Z0-9]\S*(?:\s+(?:[A-Z0-9\.\-\(]\S*|' + stop_words + ')?|$)|I [A-Z0-9])(?:.*[A-HJ-Z0-9]\S*|.*[A-Z]\S+)?\s*(?:\(\d{4}\))?)'
         potential_titles = re.findall(pat1, text)
         potential_titles.extend(re.findall(pat2, text))
         potential_titles = list(set(potential_titles))
@@ -587,40 +596,41 @@ class Chatbot:
 
       #process train data 
 
-      negationList = ["n't", "never", "not", "no"]
-      strongerList = ["really", "very", "love", "hate", "terrible"]
-      strongNounList = ["love", "hate", "terrible"]
+      negationSet = {"n't", "never", "not", "no"}
+      strongerSet = {"really", "very", "love", "hate", "terrible", "truly",
+                      "despise"}
       punct = "\W+"
+      
+      newSet = set()
+      for word in negationSet:
+        newSet.add(self.p.stem(word))
+      negationSet = newSet
+
+      newSet = set()
+      for word in strongerSet:
+        newSet.add(self.p.stem(word))
+      strongerSet = newSet
       
 
       textWords = nltk.word_tokenize(text)
-      #find where negation starts
-      #textWords = addNegation(text)
-
-      #if  newText:
-        #text = newText
-          
-      #textWords = list(filter(None, re.split('\W+', text.strip())))
-      #print(textWords)
-
-      #train data
-
        
       opp = False
       pos_num = 0
       neg_num = 0
       strength_val = 1
+      num_sentiment_words = 0
 
       for word in textWords:
-        if word in negationList:
+        word = self.p.stem(word)
+        if word in negationSet:
           opp = True
           continue
         if re.match(punct, word):
           opp = False
+          strength_val = 1
           continue
-        if word in strongerList:
+        if word in strongerSet:
           strength_val = 2
-        word = self.p.stem(word)
         if word in self.new_sentiment:
           if self.new_sentiment[word] == 'pos' and not opp:
             pos_num += strength_val
@@ -630,14 +640,31 @@ class Chatbot:
             neg_num += strength_val
           else:
             pos_num += strength_val
+          num_sentiment_words += 1
 
-      if pos_num == neg_num:
-        return 0
-      elif max(pos_num, neg_num) == pos_num:
-        return 1
+      thresh = 0.25
+      if num_sentiment_words == 0:
+        sentiment = 0
+      else:
+        avg = (pos_num - neg_num)/float(num_sentiment_words)
+        if avg > 1:
+          sentiment = 2
+        elif thresh < avg <= 1:
+          sentiment = 1
+        elif -thresh <= avg <= thresh:
+          sentiment = 0
+        elif 1 <= avg < -thresh:
+          sentiment = -1
+        else:
+          sentiment = -2
 
-      return -1 
+        if not self.creative:
+          if sentiment > 1:
+            sentiment = 1
+          elif sentiment < -1:
+            sentiment = -1
 
+      return sentiment
 
     def extract_sentiment_for_movies(self, text):
       """Creative Feature: Extracts the sentiments from a line of text
@@ -814,6 +841,8 @@ class Chatbot:
       #############################################################################
       u_norm = np.linalg.norm(u,2)
       v_norm = np.linalg.norm(v,2)
+      if u_norm == 0 or v_norm == 0:
+        return 0
       dot_prod = np.dot(u, v.T)
       similarity = float(dot_prod/(u_norm*v_norm))
       #############################################################################
