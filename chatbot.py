@@ -7,6 +7,8 @@ import movielens
 import numpy as np
 import re
 import random
+import nltk
+from PorterStemmer import PorterStemmer
 
 
 class Movie:
@@ -128,6 +130,14 @@ class Chatbot:
       # movie i by user j
       self.titles, ratings = movielens.ratings()
       self.sentiment = movielens.sentiment()
+      self.new_sentiment = {}
+      self.p = PorterStemmer()
+
+      # create a new sentiment dict with stemmed keys
+      for key in self.sentiment:
+        new_key = self.p.stem(key)
+        self.new_sentiment[new_key] = self.sentiment[key]
+
       self.bin_ratings = self.binarize(ratings)
 
       # a tuple with the sentiment of the movie being discussed
@@ -141,13 +151,22 @@ class Chatbot:
       self.prev_movie = None
       self.prev_sentiment = None
 
-      # a list of (movie, sentiment) tuples that the user has described and
-      # the chatbot has processed
-      self.user_movies = []
+      # a dict where dict[i] = j is the user's sentiment j for movie index i 
+      # for movies that the user has described and the chatbot has processed
+      self.user_movies = {}
+
+      # a set of movie indexes that the user has already described
       self.user_movie_set = set()
 
       self.prefix_match_found = False
       self.disambig = False
+
+      # if chatbot is in recommend mode, only respond to yes or no
+      self.recommend_mode = False
+
+      # a list of recommendations for the user
+      self.recommendations = []
+      self.recommend_idx = 0
 
       # preprocess movie list by extracting possible titles and year
       self.movies = []
@@ -173,7 +192,7 @@ class Chatbot:
       # TODO: Write a short greeting message                                      #
       #############################################################################
 
-      greeting_message = "How can I help you?"
+      greeting_message = "Hi there! I'm Movie Chatbot. How can I help you?"
 
       #############################################################################
       #                             END OF YOUR CODE                              #
@@ -186,7 +205,7 @@ class Chatbot:
       # TODO: Write a short farewell message                                      #
       #############################################################################
 
-      goodbye_message = "Have a nice day!"
+      goodbye_message = "Have a nice day! It was fun talking to you!"
 
       #############################################################################
       #                             END OF YOUR CODE                              #
@@ -224,6 +243,14 @@ class Chatbot:
       #############################################################################
       response = ''
       #print('--------------------------------------------------')
+
+      if self.recommend_mode:
+        if re.match('yes', line.strip(), re.I):
+          return self.give_recommendation()
+        elif re.match('no', line.strip(), re.I):
+          return "Okay, I guess I've given you enough recommendations!"
+        else:
+          return "Let's talk about that later. Do you want another recommendation?"
 
       clarification = False
       if self.creative:
@@ -288,20 +315,19 @@ class Chatbot:
             return "Hmm, I couldn't find a match for \"{}\". Please tell me about some other movies you have watched!".format(title)
           elif len(idxs) == 1:
             if idxs[0] in self.user_movie_set:
-              response = "I think you already told me about that movie."
-              self.clear_current_movie()
-            else:
-              if sentiment == 0:
-                return "What did you think about \"{}\"?".format(title)
-              if sentiment == 1:
-                response = "Great, so you liked \"{}\".".format(self.titles[idxs[0]][0])
-              elif sentiment == 2:
-                response = "Wow, you really loved \"{}\"!".format(self.titles[idxs[0]][0])
-              elif sentiment == -1:
-                response = "Okay, you didn't like \"{}\".".format(self.titles[idxs[0]][0])
-              elif sentiment == -2:
-                response = "It seems like you hated \"{}\" with a passion! That's too bad.".format(self.titles[idxs[0]][0])
-              self.process_movie(idxs[0], sentiment)
+              response = "(I think you already told me about that movie, but I'll update what you tell me!)\n"
+            
+            if sentiment == 0:
+              return response + "I'm a little confused. What did you think about \"{}\"?".format(self.titles[idxs[0]][0])
+            if sentiment == 1:
+              response += "Great, so you liked \"{}\".".format(self.titles[idxs[0]][0])
+            elif sentiment == 2:
+              response += "Wow, you really loved \"{}\"!".format(self.titles[idxs[0]][0])
+            elif sentiment == -1:
+              response += "Okay, you didn't like \"{}\".".format(self.titles[idxs[0]][0])
+            elif sentiment == -2:
+              response += "It seems like you hated \"{}\" with a passion! That's too bad.".format(self.titles[idxs[0]][0])
+            self.process_movie(idxs[0], sentiment)
           else:
             response = "I found multiple movies. Which one are you talking about?\n"
             for i in idxs:
@@ -317,7 +343,7 @@ class Chatbot:
           title, idxs = matches[0]
           sentiment = self.extract_sentiment(line.replace(title, ''))
           if sentiment == 0:
-            return "So did you like \"{}\" or hate it? Please tell me.".format(title)
+            return "So did you like \"{}\" or hate it? Please tell me.".format(self.titles[idxs[0]][0])
           else:
             if len(idxs) > 1:
               return "I found multiple matches for \"{}\". Can you be more specific? Maybe try telling me the year as well.".format(title)
@@ -326,46 +352,67 @@ class Chatbot:
             else:
               if sentiment > 0:
                 if idxs[0] in self.user_movie_set:
-                  response = "I think you already told me about that movie."
+                  response = "(I think you already told me about that movie, but I'll update what you tell me!)\n"
                 else:
-                  response = "Great! So you liked \"{}\". ".format(title)
-                  self.process_movie(idxs[0], sentiment)
+                  response = "Great! So you liked \"{}\". ".format(self.titles[idxs[0]][0])
+                self.process_movie(idxs[0], sentiment)
               elif sentiment < 0:
                 if idxs[0] in self.user_movie_set:
                   response = "I think you already told me about that movie."
                 else:
-                  response = "Okay, so you didn't like \"{}\". ".format(title)
+                  response = "Okay, so you didn't like \"{}\". ".format(self.titles[idxs[0]][0])
                   self.process_movie(idxs[0], sentiment)
               else:
                 return "I'm not sure if you liked or didn't the movie. Can you tell me a movie and what you thought about it?"
             
       # recommend once we have 5 movies
       if len(self.user_movies) >= 5:
+        self.recommend_mode = True
         user_ratings = np.zeros(len(self.titles))
         for m in self.user_movies:
-          user_ratings[m[0]] = m[1]
-        recommendations = self.recommend(user_ratings, self.bin_ratings, k=5, creative=self.creative)
-        response += '\nBased on what you told me, here are some movies you might like!:\n'
-        for idx in recommendations:
-          response += '{}\n'.format(self.titles[idx][0])
+          user_ratings[m] = self.user_movies[m]
+        self.recommendations = self.recommend(user_ratings, self.bin_ratings, k=10, creative=self.creative)
+        self.recommend_idx = 0
+        return self.give_recommendation()
       else:
         response += " " + self.generate_request_for_more_movies()   
       #############################################################################
       #                             END OF YOUR CODE                              #
       #############################################################################
       return response
+    
+    def give_recommendation(self):
+      recommend_sentences = ["Why don't you check out \"{}\"? ",
+                             "I think you might enjoy \"{}\"! ",
+                             "\"{}\" might suit your tastes!"
+                             ]
+      if self.recommend_idx < len(self.recommendations):
+        response = ''
+        if self.recommend_idx == 0:
+          response += "Okay, based on what you told me, I think you would like \"{}\"! ".format(self.titles[self.recommendations[self.recommend_idx]][0])
+        else:
+          response += recommend_sentences[random.randint(0, len(recommend_sentences) - 1)].format(self.titles[self.recommendations[self.recommend_idx]][0])
+        response += 'Would you like another recommendation?'
+        self.recommend_idx += 1
+      else:
+        response = "Sorry, I don't have any more recommendations!"
+
+      return response
 
     def matches_question(self, text):
       '''
       Returns response to question
-      ''' 
-      match = re.findall('Can (.*)\?', text, re.I)
+      '''
+      question_responses = [
+                            "I don't know. Ask Google.",
+                            "I'd like to know as well.",
+                            "Let me think about that. I'll get back to you in a billion years."
+                           ] 
+      match = re.findall('(.*)\?', text, re.I)
       if match:
-        return self.flip_question(text) + " I don't know. Ask Google."
-      
-      match = re.findall('Will (.*)\?', text, re.I)
-      if match:
-        return self.flip_question(text) + " I'd like to know as well."
+        return self.flip_question(text) + ' ' + question_responses[random.randint(0, len(question_responses) - 1)] 
+      else:
+        return None      
 
     def flip_question(self, text):
       '''
@@ -417,10 +464,10 @@ class Chatbot:
         self.prefix_match_found = False
         for title in possible_titles:
           movie_idxs = self.find_movies_by_title(title)
-          print(movie_idxs)
+          #print(movie_idxs)
           if not self.prefix_match_found:
             movie_idxs.extend(self.find_movies_closest_to_title(title, max_distance=3))
-            print(movie_idxs)
+            #print(movie_idxs)
             movie_idxs = sorted(list(set(movie_idxs)))
           matches.append((title, movie_idxs))
       else: 
@@ -429,7 +476,7 @@ class Chatbot:
       return matches
 
     def process_movie(self, movie_index, sentiment):
-      self.user_movies.append((movie_index, sentiment))
+      self.user_movies[movie_index] = sentiment
       self.user_movie_set.add(movie_index)
       self.prev_idx = movie_index
       self.prev_sentiment = self.current_sentiment
@@ -463,9 +510,8 @@ class Chatbot:
       if self.creative:
         pat1 = '"(.*?)"'
         stop_words = 'at|as|of|on|to|with|and|the|in|from|&|\+|by|or|de|vs\.'
-        #pat2 = '((?:[A-HJ-Z0-9][^\s]*(?:\s+(?:[A-Z0-9.\-\(][^\s]*|' + stop_words + ')|$)|I [A-Z0-9])(?:.*[A-Z0-9][^\s]*)?\s*(?:\(\d{4}\))?)'
-        start_pat = '(?:^[A-HJ-Z0-9]\S*(?:\s+(?:[A-Z0-9.\-\(]\S*|' + stop_words + ')|$)'
-        pat2 = '((?:[A-HJ-Z0-9]\S*(?:\s+(?:[A-Z0-9\.\-\(]\S*|' + stop_words + ')?|$)|I [A-Z0-9])(?:.*[A-Z0-9]\S*)?\s*(?:\(\d{4}\))?)'
+        #pat2 = '((?:[A-HJ-Z0-9]\S*(?:\s+(?:[A-Z0-9\.\-\(]\S*|' + stop_words + ')?|$)|I [A-Z0-9])(?:.*[A-Z0-9]\S*)?\s*(?:\(\d{4}\))?)'
+        pat2 = '((?:[A-HJ-Z0-9]\S*(?:\s+(?:[A-Z0-9\.\-\(]\S*|' + stop_words + ')?|$)|I [A-Z0-9])(?:.*[A-HJ-Z0-9]\S*|.*[A-Z]\S+)?\s*(?:\(\d{4}\))?)'
         potential_titles = re.findall(pat1, text)
         potential_titles.extend(re.findall(pat2, text))
         potential_titles = list(set(potential_titles))
@@ -523,6 +569,13 @@ class Chatbot:
               return candidates
       return candidates
 
+    class Example:
+      """Represents a document with a label. klass is 'pos' or 'neg' by convention.
+          words is a list of strings.
+      """
+      def __init__(self):
+          self.klass = ''
+          self.words = []
 
     def extract_sentiment(self, text):
       """Extract a sentiment rating from a line of text.
@@ -541,11 +594,78 @@ class Chatbot:
       :param text: a user-supplied line of text
       :returns: a numerical value for the sentiment of the text
       """
-      if 'liked' or 'like' in text:
-        return 1
-      elif "didn't like" in text:
-        return -1
-      return 0
+
+      #process train data 
+
+      negationSet = {"n't", "never", "not", "no"}
+      strongerSet = {"really", "very", "love", "hate", "terrible", "truly",
+                      "despise"}
+      punct = "\W+"
+      
+      newSet = set()
+      for word in negationSet:
+        newSet.add(self.p.stem(word))
+      negationSet = newSet
+
+      newSet = set()
+      for word in strongerSet:
+        newSet.add(self.p.stem(word))
+      strongerSet = newSet
+      
+
+      textWords = nltk.word_tokenize(text)
+       
+      opp = False
+      pos_num = 0
+      neg_num = 0
+      strength_val = 1
+      num_sentiment_words = 0
+
+      for word in textWords:
+        word = self.p.stem(word)
+        if word in negationSet:
+          opp = True
+          continue
+        if re.match(punct, word):
+          opp = False
+          strength_val = 1
+          continue
+        if word in strongerSet:
+          strength_val = 2
+        if word in self.new_sentiment:
+          if self.new_sentiment[word] == 'pos' and not opp:
+            pos_num += strength_val
+          elif self.new_sentiment[word] == 'pos' and opp:
+            neg_num += strength_val
+          elif self.new_sentiment[word] == 'neg' and not opp:
+            neg_num += strength_val
+          else:
+            pos_num += strength_val
+          num_sentiment_words += 1
+
+      thresh = 0.25
+      if num_sentiment_words == 0:
+        sentiment = 0
+      else:
+        avg = (pos_num - neg_num)/float(num_sentiment_words)
+        if avg > 1:
+          sentiment = 2
+        elif thresh < avg <= 1:
+          sentiment = 1
+        elif -thresh <= avg <= thresh:
+          sentiment = 0
+        elif 1 <= avg < -thresh:
+          sentiment = -1
+        else:
+          sentiment = -2
+
+        if not self.creative:
+          if sentiment > 1:
+            sentiment = 1
+          elif sentiment < -1:
+            sentiment = -1
+
+      return sentiment
 
     def extract_sentiment_for_movies(self, text):
       """Creative Feature: Extracts the sentiments from a line of text
@@ -631,7 +751,39 @@ class Chatbot:
         if bool(re.search('(\W|^)' + clarification + '(\W|$)', self.titles[idx][0], 
                           re.I)):
           filtered_idxs.append(idx)
-
+      # try looking for phrases like 'first one' or '2nd movie'
+      if not filtered_idxs:
+        if bool(re.search('(\W|^)(first|1st)(\W|$)', clarification, re.I)) and \
+           len(candidates) >= 1:
+          filtered_idxs = [candidates[0]]
+        elif bool(re.search('(\W|^)(second|2nd)(\W|$)', clarification, re.I)) and \
+           len(candidates) >= 2:
+          filtered_idxs = [candidates[1]]
+        elif bool(re.search('(\W|^)(third|3rd)(\W|$)', clarification, re.I)) and \
+           len(candidates) >= 3:
+          filtered_idxs = [candidates[2]]
+        elif bool(re.search('(\W|^)(fourth|4th)(\W|$)', clarification, re.I)) and \
+           len(candidates) >= 4:
+          filtered_idxs = [candidates[3]]
+        elif bool(re.search('(\W|^)(fifth|5th)(\W|$)', clarification, re.I)) and \
+           len(candidates) >= 5:
+          filtered_idxs = [candidates[4]]
+        elif bool(re.search('(\W|^)(sixth|6th)(\W|$)', clarification, re.I)) and \
+           len(candidates) >= 6:
+          filtered_idxs = [candidates[5]]
+        elif bool(re.search('(\W|^)(seventh|7th)(\W|$)', clarification, re.I)) and \
+           len(candidates) >= 7:
+          filtered_idxs = [candidates[6]]
+        elif bool(re.search('(\W|^)(eighth|8th)(\W|$)', clarification, re.I)) and \
+           len(candidates) >= 8:
+          filtered_idxs = [candidates[7]]
+        elif bool(re.search('(\W|^)(ninth|9th)(\W|$)', clarification, re.I)) and \
+           len(candidates) >= 9:
+          filtered_idxs = [candidates[8]]
+        elif bool(re.search('(\W|^)(tenth|10th)(\W|$)', clarification, re.I)) and \
+           len(candidates) >= 10:
+          filtered_idxs = [candidates[9]]
+      
       if not filtered_idxs:
         return candidates
       else:
