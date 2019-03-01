@@ -31,9 +31,6 @@ release 2: July 2008
 
 import sys
 
-def helloWorld():
-    print('Hello')
-
 class PorterStemmer:
 
     def __init__(self):

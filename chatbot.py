@@ -242,7 +242,13 @@ class Chatbot:
       # it is highly recommended.                                                 #
       #############################################################################
       response = ''
-      #print('--------------------------------------------------')
+
+      swear_response = self.checkSwearWords(line)
+      if swear_response:
+        return swear_response
+      caps_lock_response = self.checkAnger(line)
+      if caps_lock_response:
+        return caps_lock_response
 
       if self.recommend_mode:
         if re.match('yes', line.strip(), re.I):
@@ -384,14 +390,14 @@ class Chatbot:
     def give_recommendation(self):
       recommend_sentences = ["Why don't you check out \"{}\"? ",
                              "I think you might enjoy \"{}\"! ",
-                             "\"{}\" might suit your tastes!"
+                             "\"{}\" might suit your tastes! "
                              ]
       if self.recommend_idx < len(self.recommendations):
         response = ''
         if self.recommend_idx == 0:
           response += "Okay, based on what you told me, I think you would like \"{}\"! ".format(self.titles[self.recommendations[self.recommend_idx]][0])
         else:
-          response += recommend_sentences[random.randint(0, len(recommend_sentences) - 1)].format(self.titles[self.recommendations[self.recommend_idx]][0])
+          response += random.choice(recommend_sentences).format(self.titles[self.recommendations[self.recommend_idx]][0])
         response += 'Would you like another recommendation?'
         self.recommend_idx += 1
       else:
@@ -410,7 +416,7 @@ class Chatbot:
                            ] 
       match = re.findall('(.*)\?', text, re.I)
       if match:
-        return self.flip_question(text) + ' ' + question_responses[random.randint(0, len(question_responses) - 1)] 
+        return self.flip_question(text) + ' ' + random.choice(question_responses) 
       else:
         return None      
 
@@ -422,7 +428,9 @@ class Chatbot:
                'I': 'you',
                'me': 'you',
                'my': 'your',
-               'your': 'my'
+               'your': 'my',
+               'myself': 'yourself',
+               'yourself': 'myself'
               }
       # some common prepositions
       prep_set = {'of','with','at','from','including','until','against',
@@ -447,7 +455,7 @@ class Chatbot:
                    "That's really cool and all, but can we go back to talking about movies? I want to know more about movies you enjoyed!",
                    "Maybe we can talk about that later. Let's get back to talking about movies. Why don't you tell me what you thought about a movie you watched recently?"
                   ]
-      return responses[random.randint(0, len(responses) - 1)]
+      return random.choice(responses)
 
     def generate_request_for_more_movies(self):
       responses = [
@@ -455,7 +463,7 @@ class Chatbot:
                    "Tell me another one of your favorite movies. This is so much fun!",
                    "What is another movie you liked?"
                   ]
-      return responses[random.randint(0, len(responses) - 1)]
+      return random.choice(responses)
 
     def get_possible_matching_titles(self, line):
       possible_titles = self.extract_titles(line)
@@ -510,7 +518,6 @@ class Chatbot:
       if self.creative:
         pat1 = '"(.*?)"'
         stop_words = 'at|as|of|on|to|with|and|the|in|from|&|\+|by|or|de|vs\.'
-        #pat2 = '((?:[A-HJ-Z0-9]\S*(?:\s+(?:[A-Z0-9\.\-\(]\S*|' + stop_words + ')?|$)|I [A-Z0-9])(?:.*[A-Z0-9]\S*)?\s*(?:\(\d{4}\))?)'
         pat2 = '((?:[A-HJ-Z0-9]\S*(?:\s+(?:[A-Z0-9\.\-\(]\S*|' + stop_words + ')?|$)|I [A-Z0-9])(?:.*[A-HJ-Z0-9]\S*|.*[A-Z]\S+)?\s*(?:\(\d{4}\))?)'
         potential_titles = re.findall(pat1, text)
         potential_titles.extend(re.findall(pat2, text))
@@ -599,7 +606,8 @@ class Chatbot:
 
       negationSet = {"n't", "never", "not", "no"}
       strongerSet = {"really", "very", "love", "hate", "terrible", "truly",
-                      "despise"}
+                     "despise", "great", "fantastic", "amazing", "extremely",
+                     "horrible", "disgusting", "stunning", "adore"}
       punct = "\W+"
       
       newSet = set()
@@ -654,7 +662,7 @@ class Chatbot:
           sentiment = 1
         elif -thresh <= avg <= thresh:
           sentiment = 0
-        elif 1 <= avg < -thresh:
+        elif -1 <= avg < -thresh:
           sentiment = -1
         else:
           sentiment = -2
@@ -846,7 +854,7 @@ class Chatbot:
       if u_norm == 0.0 or v_norm == 0.0:
         return 0.0
       else:
-        similarity = float( dot_prod)/(u_norm*v_norm)
+        similarity = float(dot_prod)/(u_norm*v_norm)
       #############################################################################
       #                             END OF YOUR CODE                              #
       #############################################################################
@@ -913,40 +921,29 @@ class Chatbot:
       return recommendations
 
 
-      def checkAnger(self, string):
-          words = string.split()
-          mixedCase = any([(not word.islower() and not word.isupper()) for word in words])
-          upperCase = all([(word.isupper()) for word in words])
-          
-          upperCaseResponses = ["but you yell at me?!",
-                               "and is your caps lock key stuck or something?",
-                               "maybe 'cause you were busy capslocking >_>."]
-          mixedCaseResponses = ["but you capslock like a psycho",
-                               "you capslock funny."]
-          
-          if not self.extract_titles(string):
-              if upperCase:
-                  print("You don't give me a title, " + random.choice(upperCaseResponses))
-              if mixedCase:
-                  print("No title," + random.choice(mixedCaseResponse))
-          else:
-              if upperCase:
-                  print("Ok ok, let me search but don't have to yell at me!")
-              if mixedCase:
-                  print("I'm searching, but did you notice you capitalized funny?")
+    def checkAnger(self, string):
+      response = ''
 
-          swearWords = self.checkSwearWords(string)
+      words = string.split()
+      upperCase = all([(word.isupper()) for word in words])
           
-          if swearWords:
-              print('And wash your mouth with soap!')
+      upperCaseResponses = ["Any reason you are yelling at me?!",
+                            "Is your caps lock key stuck or something?",
+                            "It looks like you were busy capslocking >_>."]
+      if upperCase:    
+        return random.choice(upperCaseResponses)
+      else:
+        return ''
 
-
-      def checkSwearWords(self, string):
-          swearSet = {"fuck", "fucking", "shit", "damn", "bitch", "crap", "piss",
-                        "dick", "cock", "pussy","asshole","fag","bastard","slut","douche",
-                        "bollocks","arsehole","bloody"}
-          words = set(string.lower().split())
-          return words & swearSet
+    def checkSwearWords(self, string):
+      swearSet = {"fuck", "fucking", "shit", "damn", "bitch", "crap", "piss",
+                  "dick", "cock", "pussy","asshole","fag","bastard","slut","douche",
+                  "bollocks","arsehole","bloody"}
+      words = set(string.lower().split())
+      if words & swearSet:
+        return 'Wash your mouth with soap!'
+      else:
+        return ''
 
 
     #############################################################################
@@ -971,10 +968,18 @@ class Chatbot:
       can do and how the user can interact with it.
       """
       return """
-      Your task is to implement the chatbot as detailed in the PA6 instructions.
-      Remember: in the starter mode, movie names will come in quotation marks and
-      expressions of sentiment will be simple!
-      Write here the description for your own chatbot!
+      Creative Mode:
+      1. Identifies movies in quotation marks. Also identifies outside of quotation marks if first word is capitalized correctly and either date is included or last word is correctly capitalized (eg. "The american president (1995)", "The great Escape")
+      2. Handles alternate/foreign titles
+      3. Handles foreign articles (le, la, les, el, los)
+      4. Handles [+&] in title
+      5. Disambiguates by matching title, year, or position in given list ("The first one", "The 2nd movie"). Includes dialogue for disambiguation
+      6. Extracts fine-grained sentiment by taking the weighted average of sentiment words and using a threshold
+      7. Spelling correction for regular/foreign/alternate titles
+      8. Understands reference to things said previously. If it asks to clarify sentiment, requires anaphoric expression. Detects duplicate movies you've told it about.
+      9. Responds to irrelevant input 
+     10. Responds to arbitrary questions. Reflects back questions such as "Can you help me?"-->"Can I help you?"
+     11. Responds to anger by detecting swear words or caps lock
       """
 
 
