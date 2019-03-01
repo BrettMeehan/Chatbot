@@ -8,6 +8,7 @@ import numpy as np
 import re
 import random
 
+
 class Movie:
     def __init__(self):
       # possible titles for the movie
@@ -540,7 +541,7 @@ class Chatbot:
       :param text: a user-supplied line of text
       :returns: a numerical value for the sentiment of the text
       """
-      if 'liked' in text:
+      if 'liked' or 'like' in text:
         return 1
       elif "didn't like" in text:
         return -1
@@ -663,7 +664,6 @@ class Chatbot:
         high_thresh = 4
         low_thresh = 5-high_thresh
         binarized_ratings = np.where(ratings >= high_thresh, 2.0, 0.0) + np.where((ratings > threshold) & (ratings < high_thresh),1.0,0.0) + np.where((ratings <= threshold) & (ratings > low_thresh),-1.0,0.0) + np.where((ratings != 0.0) & (ratings <= low_thresh), -2.0, 0.0) 
-
       else:
         binarized_ratings = np.where(ratings > threshold, 1.0, 0.0) + np.where((ratings != 0.0) & (ratings <= threshold), -1.0, 0.0) 
 
@@ -687,10 +687,14 @@ class Chatbot:
       #############################################################################
       # TODO: Compute cosine similarity between the two vectors.
       #############################################################################
-      u_norm = np.linalg.norm(u,2)
-      v_norm = np.linalg.norm(v,2)
-      dot_prod = np.dot(u, v.T)
-      similarity = float(dot_prod/(u_norm*v_norm))
+      u_norm = np.linalg.norm(u)
+      v_norm = np.linalg.norm(v)
+      dot_prod = np.dot(u, v)
+      similarity = dot_prod
+      if u_norm == 0.0 or v_norm == 0.0:
+        return 0.0
+      else:
+        similarity = float( dot_prod)/(u_norm*v_norm)
       #############################################################################
       #                             END OF YOUR CODE                              #
       #############################################################################
@@ -726,44 +730,71 @@ class Chatbot:
 
       # Populate this list with k movie indices to recommend to the user.
 
-      user_ratings = self.binarize(user_ratings, creative = creative)
-      ratings_matrix = self.binarize(ratings_matrix, creative = creative)
-
       unseen_movies = np.where(user_ratings == 0)[0]
-      liked_movies = np.where(user_ratings == 1)[0]
-
-      ratings_matrix_full = np.insert(ratings_matrix, 0, user_ratings, axis = 1)
+      seen_movies = np.where(user_ratings != 0)[0]
 
       ratings_unseen = []
 
       for i in unseen_movies:
-        unseen_vector = ratings_matrix_full[i, :]
+        unseen_ratings = ratings_matrix[i, :]
         weights = []
         ratings = []
-        for j in liked_movies:
-          liked_vector = ratings_matrix_full[j, :]
-          weight = self.similarity(unseen_vector, liked_vector)
+        for j in seen_movies:
+          seen_ratings = ratings_matrix[j, :]
+          weight = self.similarity(unseen_ratings, seen_ratings)
           weights.append(weight)
           ratings.append(user_ratings[j])
-        weights = np.asarray(weights)
-        ratings = np.asarray(ratings)
-        score = float(np.dot(weights, ratings.T))
-        ratings_unseen.append([i, score])
+        estimated_rating = float(np.dot(weights, ratings))
+        ratings_unseen.append([i, estimated_rating])
+
 
       ratings_unseen.sort(key = lambda x:x[1], reverse = True)
 
-      recommendations = []
+      recommendations = []  
 
       for i in range(k):
         recommendations.append(ratings_unseen[i][0])
-
-
-      
 
       #############################################################################
       #                             END OF YOUR CODE                              #
       #############################################################################
       return recommendations
+
+
+      def checkAnger(self, string):
+          words = string.split()
+          mixedCase = any([(not word.islower() and not word.isupper()) for word in words])
+          upperCase = all([(word.isupper()) for word in words])
+          
+          upperCaseResponses = ["but you yell at me?!",
+                               "and is your caps lock key stuck or something?",
+                               "maybe 'cause you were busy capslocking >_>."]
+          mixedCaseResponses = ["but you capslock like a psycho",
+                               "you capslock funny."]
+          
+          if not self.extract_titles(string):
+              if upperCase:
+                  print("You don't give me a title, " + random.choice(upperCaseResponses))
+              if mixedCase:
+                  print("No title," + random.choice(mixedCaseResponse))
+          else:
+              if upperCase:
+                  print("Ok ok, let me search but don't have to yell at me!")
+              if mixedCase:
+                  print("I'm searching, but did you notice you capitalized funny?")
+
+          swearWords = self.checkSwearWords(string)
+          
+          if swearWords:
+              print('And wash your mouth with soap!')
+
+
+      def checkSwearWords(self, string):
+          swearSet = {"fuck", "fucking", "shit", "damn", "bitch", "crap", "piss",
+                        "dick", "cock", "pussy","asshole","fag","bastard","slut","douche",
+                        "bollocks","arsehole","bloody"}
+          words = set(string.lower().split())
+          return words & swearSet
 
 
     #############################################################################
